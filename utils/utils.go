@@ -1,33 +1,38 @@
 package utils
 
+import (
+	"strconv"
+	"strings"
+)
+
 // Entries defines multiple entries
 type Entries struct {
-	Words []string
+	Words     []string
 	WordsData WordData
 }
 
 // Abs function
-func Abs( arg int ) int {
-	
-	if arg < 0{
+func Abs(arg int) int {
+
+	if arg < 0 {
 		arg = -arg
 	}
-	
-	return arg 
+
+	return arg
 }
 
 //Min function
-func Min(arg ...int  ) int {
-	
-	res := findMin(arg)	
+func Min(arg ...int) int {
+
+	res := findMin(arg)
 
 	return res
 }
 
-func findMin(a [] int)  int{
-	var min int = a[0] 
-	for _,arg := range a{
-		if (min>arg){
+func findMin(a []int) int {
+	var min int = a[0]
+	for _, arg := range a {
+		if min > arg {
 			min = arg
 		}
 	}
@@ -35,18 +40,17 @@ func findMin(a [] int)  int{
 }
 
 //Max function
-func Max(arg ...int  ) int {
-	
-	res := findMax(arg)	
+func Max(arg ...int) int {
+
+	res := findMax(arg)
 
 	return res
 }
 
-
-func findMax(a [] int)  int{
+func findMax(a []int) int {
 	var max int = 0
-	for _,arg := range a{
-		if (max<arg){
+	for _, arg := range a {
+		if max < arg {
 			max = arg
 		}
 	}
@@ -183,4 +187,14 @@ func Substring(s string, start int, end int) string {
 		i++
 	}
 	return s[startStrIdx:]
+}
+
+func IsNumber(input string) bool {
+	_, err := strconv.Atoi(input)
+	return err == nil
+}
+
+func IsAcronym(input string) bool {
+
+	return (strings.Compare(strings.ToUpper(input), input) == 0) || (IsNumber(input))
 }

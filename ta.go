@@ -1,15 +1,16 @@
 package ta
 
-
 import (
 	"bufio"
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"math"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -28,20 +29,22 @@ const (
 	// BEST will yield 'best' suggestion
 	BEST suggestionLevel = iota
 	// CLOSEST will yield 'closest' suggestion
-	CLOSEST 
+	CLOSEST
 	//ALL will yield 'all' suggestion
-	ALL 
+	ALL
 )
 
 // SpellModel provides access to functions for spelling correction
 type SpellModel struct {
 	MaxEditDistance uint32
-	PrefixLength uint32
+	PrefixLength    uint32
 
-	cumulativeFreq uint64
+	cumulativeFreq    uint64
 	dictionaryDeletes *utils.DictionaryDeletes
-	longestWord uint32
-	library *utils.Library
+	longestWord       uint32
+	library           *utils.Library
+
+	regexCom *regexp.Regexp
 }
 
 // Main constants
@@ -124,6 +127,7 @@ func (model *SpellModel) Init() *SpellModel {
 	s.MaxEditDistance = defaultEditDistance
 	s.PrefixLength = defaultPrefixLength
 	s.library = utils.NewLibrary()
+	s.regexCom = regexp.MustCompile(`([^\W_]+['’]*[^\W_]*)`)
 	return s
 }
 
@@ -147,8 +151,8 @@ func (model *SpellModel) AddEntry(de utils.Entry, opts ...utils.DictionaryOption
 	// recalculate the deletes as these should never change
 	if entry, exists := model.library.Load(dictOptions.Name, word); exists {
 		atomic.AddUint64(&model.cumulativeFreq, ^(de.Frequency - 1))
-		if !dictOptions.OverrideFrequency{
-			de.Frequency = de.Frequency + entry.Frequency	
+		if !dictOptions.OverrideFrequency {
+			de.Frequency = de.Frequency + entry.Frequency
 		}
 		if !dictOptions.OverrideWordData {
 			de.WordData = entry.WordData
@@ -184,11 +188,9 @@ func (model *SpellModel) AddEntry(de utils.Entry, opts ...utils.DictionaryOption
 	return true, nil
 }
 
-
-
 // AddEntries adds multiple string entries to the dictionary with
 // same info.
-func (model *SpellModel) AddEntries(entries utils.Entries,  opts ...utils.DictionaryOption) (bool, error){
+func (model *SpellModel) AddEntries(entries utils.Entries, opts ...utils.DictionaryOption) (bool, error) {
 	dictOptions := model.defaultDictOptions()
 
 	for _, opt := range opts {
@@ -200,28 +202,27 @@ func (model *SpellModel) AddEntries(entries utils.Entries,  opts ...utils.Dictio
 	for index, word := range entries.Words {
 		if index == 0 {
 			model.AddEntry(utils.Entry{
-					Frequency: 1,
-					Word: word,
-					WordData: entries.WordsData,
-				}, 
+				Frequency: 1,
+				Word:      word,
+				WordData:  entries.WordsData,
+			},
 				OverrideFrequency(dictOptions.OverrideFrequency),
 				OverrideWordData(dictOptions.OverrideWordData),
 			)
 		} else {
 			model.AddEntry(utils.Entry{
-					Frequency: 1,
-					Word: word,
-					WordData: entries.WordsData,
-				}, 
+				Frequency: 1,
+				Word:      word,
+				WordData:  entries.WordsData,
+			},
 				OverrideWordData(dictOptions.OverrideWordData),
 			)
 		}
-		
+
 	}
 
 	return true, nil
 }
-
 
 // CreateDictionary loads multiple dictionary entries from a file of
 // words. Merges with any dictionary data already loaded.
@@ -244,15 +245,15 @@ func (model *SpellModel) CreateDictionary(filePath string, opts ...utils.Diction
 
 	for s.Scan() {
 		model.AddEntry(utils.Entry{
-			Frequency: 1, 
-			Word: s.Text(),
+			Frequency: 1,
+			Word:      s.Text(),
 		})
 	}
-		
+
 	err = s.Err()
 	err = f.Close()
 
-	if  err != nil {
+	if err != nil {
 		return false, err
 	}
 
@@ -341,7 +342,6 @@ func (model *SpellModel) RemoveEntries(words []string, opts ...utils.DictionaryO
 	return true, nil
 }
 
-
 // Save a representation of spell to disk at filename
 func (model *SpellModel) Save(filename string) error {
 	jsonStr, _ := json.Marshal(map[string]interface{}{
@@ -370,7 +370,6 @@ func (model *SpellModel) Save(filename string) error {
 
 	return nil
 }
-
 
 type lookupParams struct {
 	dictOpts         *utils.DictOptions
@@ -671,6 +670,83 @@ func (model *SpellModel) Lookup(input string, opts ...LookupOption) (utils.Sugge
 	return results, nil
 }
 
+func (model *SpellModel) LookupCompund(input string, opts ...LookupOption) (utils.SuggestionList, error) {
+
+	lookupParams := model.defaultLookupParams()
+
+	for _, opt := range opts {
+		if err := opt(lookupParams); err != nil {
+			return nil, err
+		}
+	}
+
+	editDistance := int(lookupParams.editDistance)
+
+	terms := model.regexCom.FindAllString(input, -1)
+
+	suggestions := make(utils.SuggestionList, 0)
+	suggestions_parts := make(utils.SuggestionList, 0)
+
+	// isLastCombi := false
+
+	for i := range terms {
+
+		if utils.IsNumber(terms[i]) {
+			suggestions_parts = append(suggestions_parts, utils.Suggestion{Entry: utils.Entry{Word: terms[i], Frequency: 1}, Distance: 0})
+			continue
+		}
+
+		if utils.IsAcronym(terms[i]) {
+			suggestions_parts = append(suggestions_parts, utils.Suggestion{Entry: utils.Entry{Word: terms[i], Frequency: 1}, Distance: 0})
+			continue
+		}
+		suggestions, err := model.Lookup(terms[i], opts...)
+		if err != nil {
+			suggestions_parts = append(suggestions_parts, utils.Suggestion{Entry: utils.Entry{Word: terms[i], Frequency: 1}, Distance: 0})
+			continue
+		}
+
+		if len(suggestions) > 0 && (suggestions[0].Distance == 0 || len(terms[i]) == 1) {
+			suggestions_parts = append(suggestions_parts, suggestions[0])
+		} else {
+			var suggestions_best_split = utils.Suggestion{Entry: utils.Entry{Word: "", Frequency: 0}, Distance: -1}
+			if len(suggestions) > 0 {
+				suggestions_best_split = suggestions[0]
+			}
+			tmp_term := terms[1]
+			if len(tmp_term) > 1 {
+				for j := 1; j < len(tmp_term); j++ {
+					part_1 := tmp_term[:j]
+					part_2 := tmp_term[j:]
+
+					suggestions_1, err := model.Lookup(part_1, opts...)
+					if err != nil || len(suggestions_1) == 0 {
+						continue
+					}
+
+					suggestions_2, err := model.Lookup(part_2, opts...)
+					if err != nil || len(suggestions_2) == 0 {
+						continue
+					}
+
+					tmp_sugg := fmt.Sprintf("%s %s", suggestions_1[0].Word, suggestions_2[0].Word)
+
+					tmp_distance := lookupParams.distanceFunction([]rune(tmp_term), []rune(tmp_sugg), editDistance)
+
+					if tmp_distance < 0 {
+						tmp_distance = editDistance + 1
+					}
+
+					if suggestions_best_split.Distance > -1 {
+					}
+				}
+			}
+		}
+	}
+
+	return suggestions, nil
+}
+
 type segmentParams struct {
 	lookupOptions []LookupOption
 }
@@ -883,7 +959,6 @@ func (model *SpellModel) generateDeletes(word string, editDistance uint32, delet
 	return deletes
 }
 
-
 func (model *SpellModel) getDeletes(word string) deletes {
 	deletes := deletes{}
 	wordLen := len([]rune(word))
@@ -899,7 +974,3 @@ func (model *SpellModel) getDeletes(word string) deletes {
 
 	return model.generateDeletes(word, 0, deletes)
 }
-
-
-
-

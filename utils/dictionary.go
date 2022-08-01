@@ -9,8 +9,8 @@ type Dictionary map[string]Entry
 
 // Entry represents a word in the dictionary
 type Entry struct {
-	Frequency uint64 `json:",omitempty"`
-	Word      string
+	Frequency uint64   `json:"freq,omitempty"`
+	Word      string   `json:"word"`
 	WordData  WordData `json:",omitempty"`
 }
 
@@ -34,15 +34,14 @@ type DeleteEntry struct {
 
 // DictOptions are the dictionary options
 type DictOptions struct {
-	Name string
+	Name              string
 	OverrideFrequency bool
-	OverrideWordData bool
+	OverrideWordData  bool
 }
 
 // DictionaryOption is a function that controls the dictionary being used.
 // An error will be returned if a dictionary option is invalid
 type DictionaryOption func(*DictOptions) error
-
 
 // NewDictionaryDeletes creates a new dictionary with deletes
 func NewDictionaryDeletes() *DictionaryDeletes {
