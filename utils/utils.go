@@ -47,8 +47,25 @@ func Max(arg ...int) int {
 	return res
 }
 
+func MaxU(arg ...uint64) uint64 {
+
+	res := findUMax(arg)
+
+	return res
+}
+
 func findMax(a []int) int {
 	var max int = 0
+	for _, arg := range a {
+		if max < arg {
+			max = arg
+		}
+	}
+	return max
+}
+
+func findUMax(a []uint64) uint64 {
+	var max uint64 = 0
 	for _, arg := range a {
 		if max < arg {
 			max = arg

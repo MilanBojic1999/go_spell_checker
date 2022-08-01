@@ -39,17 +39,21 @@ type SpellModel struct {
 	MaxEditDistance uint32
 	PrefixLength    uint32
 
-	cumulativeFreq    uint64
-	dictionaryDeletes *utils.DictionaryDeletes
-	longestWord       uint32
-	library           *utils.Library
+	cumulativeFreq          uint64
+	cumulativeBigramFreq    uint64
+	dictionaryDeletes       *utils.DictionaryDeletes
+	dictionaryBigramDeletes *utils.DictionaryDeletes
+	longestWord             uint32
+	longestBigram           uint32
+	library                 *utils.Library
 
 	regexCom *regexp.Regexp
 }
 
 // Main constants
 const (
-	defaultDict         = "default"
+	defaultDictWord     = "word"
+	defaultDictBigram   = "bigram"
 	defaultEditDistance = 2
 	defaultPrefixLength = 7
 )
@@ -122,8 +126,11 @@ func NewSpellModel() *SpellModel {
 func (model *SpellModel) Init() *SpellModel {
 	s := new(SpellModel)
 	s.cumulativeFreq = 0
+	s.cumulativeBigramFreq = 0
 	s.dictionaryDeletes = utils.NewDictionaryDeletes()
+	s.dictionaryBigramDeletes = utils.NewDictionaryDeletes()
 	s.longestWord = 0
+	s.longestBigram = 0
 	s.MaxEditDistance = defaultEditDistance
 	s.PrefixLength = defaultPrefixLength
 	s.library = utils.NewLibrary()
@@ -188,6 +195,60 @@ func (model *SpellModel) AddEntry(de utils.Entry, opts ...utils.DictionaryOption
 	return true, nil
 }
 
+func (model *SpellModel) AddBigram(de utils.Entry, opts ...utils.DictionaryOption) (bool, error) {
+	dictOptions := model.defaultDictOptions()
+
+	for _, opt := range opts {
+		if err := opt(dictOptions); err != nil {
+			return false, err
+		}
+	}
+
+	word := de.Word
+
+	atomic.AddUint64(&model.cumulativeBigramFreq, de.Frequency)
+
+	// If the word already exists, just update its result - we don't need to
+	// recalculate the deletes as these should never change
+	if entry, exists := model.library.Load(defaultDictBigram, word); exists {
+		atomic.AddUint64(&model.cumulativeFreq, ^(de.Frequency - 1))
+		if !dictOptions.OverrideFrequency {
+			de.Frequency = de.Frequency + entry.Frequency
+		}
+		if !dictOptions.OverrideWordData {
+			de.WordData = entry.WordData
+		}
+		model.library.Store(defaultDictBigram, word, de)
+		return false, nil
+	}
+
+	model.library.Store(defaultDictBigram, word, de)
+
+	// Keep track of the longest word in the dictionary
+	wordLength := uint32(len([]rune(word)))
+	if wordLength > atomic.LoadUint32(&model.longestBigram) {
+		atomic.StoreUint32(&model.longestBigram, wordLength)
+	}
+
+	// Get the deletes for the word. For each delete, hash it and associate the
+	// word with it
+	deletes := model.getDeletes(word)
+	if len(deletes) > 0 {
+		wordRunes := []rune(word)
+
+		de := utils.DeleteEntry{
+			Len:   len(wordRunes),
+			Runes: wordRunes,
+			Str:   word,
+		}
+		for deleteHash := range deletes {
+			model.dictionaryBigramDeletes.Add(dictOptions.Name, deleteHash, &de)
+		}
+	}
+
+	return true, nil
+}
+
 // AddEntries adds multiple string entries to the dictionary with
 // same info.
 func (model *SpellModel) AddEntries(entries utils.Entries, opts ...utils.DictionaryOption) (bool, error) {
@@ -211,6 +272,40 @@ func (model *SpellModel) AddEntries(entries utils.Entries, opts ...utils.Diction
 			)
 		} else {
 			model.AddEntry(utils.Entry{
+				Frequency: 1,
+				Word:      word,
+				WordData:  entries.WordsData,
+			},
+				OverrideWordData(dictOptions.OverrideWordData),
+			)
+		}
+
+	}
+
+	return true, nil
+}
+
+func (model *SpellModel) AddBigrams(entries utils.Entries, opts ...utils.DictionaryOption) (bool, error) {
+	dictOptions := model.defaultDictOptions()
+
+	for _, opt := range opts {
+		if err := opt(dictOptions); err != nil {
+			return false, err
+		}
+	}
+
+	for index, word := range entries.Words {
+		if index == 0 {
+			model.AddBigram(utils.Entry{
+				Frequency: 1,
+				Word:      word,
+				WordData:  entries.WordsData,
+			},
+				OverrideFrequency(dictOptions.OverrideFrequency),
+				OverrideWordData(dictOptions.OverrideWordData),
+			)
+		} else {
+			model.AddBigram(utils.Entry{
 				Frequency: 1,
 				Word:      word,
 				WordData:  entries.WordsData,
@@ -262,7 +357,7 @@ func (model *SpellModel) CreateDictionary(filePath string, opts ...utils.Diction
 
 func (model *SpellModel) defaultDictOptions() *utils.DictOptions {
 	return &utils.DictOptions{
-		Name: defaultDict,
+		Name: defaultDictWord,
 	}
 }
 
@@ -681,6 +776,7 @@ func (model *SpellModel) LookupCompund(input string, opts ...LookupOption) (util
 	}
 
 	editDistance := int(lookupParams.editDistance)
+	dict := lookupParams.dictOpts.Name
 
 	terms := model.regexCom.FindAllString(input, -1)
 
@@ -709,9 +805,9 @@ func (model *SpellModel) LookupCompund(input string, opts ...LookupOption) (util
 		if len(suggestions) > 0 && (suggestions[0].Distance == 0 || len(terms[i]) == 1) {
 			suggestions_parts = append(suggestions_parts, suggestions[0])
 		} else {
-			var suggestions_best_split = utils.Suggestion{Entry: utils.Entry{Word: "", Frequency: 0}, Distance: -1}
+			var suggestions_best_split *utils.Suggestion
 			if len(suggestions) > 0 {
-				suggestions_best_split = suggestions[0]
+				suggestions_best_split = &suggestions[0]
 			}
 			tmp_term := terms[1]
 			if len(tmp_term) > 1 {
@@ -737,12 +833,67 @@ func (model *SpellModel) LookupCompund(input string, opts ...LookupOption) (util
 						tmp_distance = editDistance + 1
 					}
 
-					if suggestions_best_split.Distance > -1 {
+					if suggestions_best_split != nil {
+						if tmp_distance > suggestions_best_split.Distance {
+							continue
+						}
+						if tmp_distance < suggestions_best_split.Distance {
+							suggestions_best_split = nil
+						}
+					}
+					tmp_count := uint64(0)
+					if returnal, exists := model.library.Load(dict, tmp_sugg); exists {
+						tmp_count = returnal.Frequency
+
+						if len(suggestions) > 0 {
+							best_si := &suggestions[0]
+
+							if strings.Compare(terms[1], suggestions_1[0].Word+suggestions_2[0].Word) == 0 {
+								tmp_count = utils.MaxU(tmp_count, best_si.Frequency+2)
+							} else if strings.Compare(terms[1], suggestions_1[0].Word) == 0 || strings.Compare(terms[1], suggestions_2[0].Word) == 0 {
+								tmp_count = utils.MaxU(tmp_count, best_si.Frequency+1)
+							}
+
+						} else if strings.Compare(terms[1], suggestions_1[0].Word+suggestions_2[0].Word) == 0 {
+							tmp_count = utils.MaxU(tmp_count, utils.MaxU(suggestions_1[0].Frequency, suggestions_1[0].Frequency)+2)
+						}
+					} else {
+						tmp_count = (suggestions_1[0].Frequency / model.cumulativeFreq) * suggestions_2[0].Frequency
+					}
+
+					suggestion_split := utils.Suggestion{Entry: utils.Entry{Word: tmp_sugg, Frequency: tmp_count}, Distance: tmp_distance}
+
+					if suggestions_best_split == nil || suggestion_split.Frequency > suggestions_best_split.Frequency {
+						suggestions_best_split = &suggestion_split
 					}
 				}
+
+				if suggestions_best_split != nil {
+					suggestions_parts = append(suggestions_parts, *suggestions_best_split)
+				} else {
+					item := utils.Suggestion{Entry: utils.Entry{Word: terms[i], Frequency: 1}, Distance: editDistance + 1}
+					suggestions_parts = append(suggestions_parts, item)
+				}
+			} else {
+				item := utils.Suggestion{Entry: utils.Entry{Word: terms[i], Frequency: 1}, Distance: editDistance + 1}
+				suggestions_parts = append(suggestions_parts, item)
 			}
 		}
 	}
+
+	joined_terms := ""
+	joined_count := 1
+	for _, item := range suggestions_parts {
+		joined_terms = joined_terms + item.Word + " "
+	}
+
+	joined_terms = strings.TrimRight(joined_terms, " ")
+
+	suggestion := new(utils.Suggestion)
+	suggestion.Entry = utils.Entry{Word: joined_terms, Frequency: uint64(joined_count)}
+	suggestion.Distance = 2
+
+	suggestions = append(suggestions, *suggestion)
 
 	return suggestions, nil
 }
