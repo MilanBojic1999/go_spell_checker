@@ -783,7 +783,7 @@ func (model *SpellModel) LookupCompund(input string, opts ...LookupOption) (util
 	suggestions := make(utils.SuggestionList, 0)
 	suggestions_parts := make(utils.SuggestionList, 0)
 
-	// isLastCombi := false
+	isLastCombi := false
 
 	for i := range terms {
 
@@ -801,6 +801,33 @@ func (model *SpellModel) LookupCompund(input string, opts ...LookupOption) (util
 			suggestions_parts = append(suggestions_parts, utils.Suggestion{Entry: utils.Entry{Word: terms[i], Frequency: 1}, Distance: 0})
 			continue
 		}
+		if i > 0 && !isLastCombi {
+			suggest_combi, err := model.Lookup(terms[i-1]+terms[i], opts...)
+			if err != nil {
+				suggestions_parts = append(suggestions_parts, utils.Suggestion{Entry: utils.Entry{Word: terms[i], Frequency: 1}, Distance: 0})
+				continue
+			}
+
+			if len(suggest_combi) > 0 {
+				best1 := suggestions_parts[len(suggestions_parts)-1]
+				var best2 utils.Suggestion
+				if len(suggestions) > 0 {
+					best2 = suggestions[0]
+				} else {
+					best2 = utils.Suggestion{Entry: utils.Entry{Word: terms[i], Frequency: 100 * uint64(model.longestWord) / uint64(len(terms[i]))}, Distance: editDistance + 1}
+				}
+
+				distance1 := best1.Distance + best2.Distance
+				if distance1 >= 0 && suggest_combi[0].Distance+1 < distance1 || suggest_combi[0].Distance+1 == distance1 &&
+					float64(suggest_combi[0].Frequency) > (float64(best1.Frequency)/float64(model.cumulativeFreq))*float64(best2.Frequency) {
+					suggest_combi[0].Distance += 1
+					suggestions_parts[len(suggestions_parts)-1] = suggest_combi[0]
+					isLastCombi = true
+					continue
+				}
+			}
+		}
+		isLastCombi = false
 
 		if len(suggestions) > 0 && (suggestions[0].Distance == 0 || len(terms[i]) == 1) {
 			suggestions_parts = append(suggestions_parts, suggestions[0])
