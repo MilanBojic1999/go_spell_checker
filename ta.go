@@ -809,7 +809,7 @@ func (model *SpellModel) LookupCompund(input string, opts ...LookupOption) (util
 			if len(suggestions) > 0 {
 				suggestions_best_split = &suggestions[0]
 			}
-			tmp_term := terms[1]
+			tmp_term := terms[i]
 			if len(tmp_term) > 1 {
 				for j := 1; j < len(tmp_term); j++ {
 					part_1 := tmp_term[:j]
@@ -848,13 +848,13 @@ func (model *SpellModel) LookupCompund(input string, opts ...LookupOption) (util
 						if len(suggestions) > 0 {
 							best_si := &suggestions[0]
 
-							if strings.Compare(terms[1], suggestions_1[0].Word+suggestions_2[0].Word) == 0 {
+							if strings.Compare(terms[i], suggestions_1[0].Word+suggestions_2[0].Word) == 0 {
 								tmp_count = utils.MaxU(tmp_count, best_si.Frequency+2)
-							} else if strings.Compare(terms[1], suggestions_1[0].Word) == 0 || strings.Compare(terms[1], suggestions_2[0].Word) == 0 {
+							} else if strings.Compare(terms[i], suggestions_1[0].Word) == 0 || strings.Compare(terms[i], suggestions_2[0].Word) == 0 {
 								tmp_count = utils.MaxU(tmp_count, best_si.Frequency+1)
 							}
 
-						} else if strings.Compare(terms[1], suggestions_1[0].Word+suggestions_2[0].Word) == 0 {
+						} else if strings.Compare(terms[i], suggestions_1[0].Word+suggestions_2[0].Word) == 0 {
 							tmp_count = utils.MaxU(tmp_count, utils.MaxU(suggestions_1[0].Frequency, suggestions_1[0].Frequency)+2)
 						}
 					} else {

@@ -131,14 +131,21 @@ func readFile(path string) []*utils.Entry {
 
 const MIN_FREQ = 50
 
-func new_main(enteries []*utils.Entry) {
+func new_main(enteries_words, enteries_bigrams []*utils.Entry) {
 	model := ta.NewSpellModel()
 
-	for _, en := range enteries {
+	for _, en := range enteries_words {
 		if en.Frequency >= MIN_FREQ {
 			model.AddEntry(*en)
 		}
 	}
+
+	for _, en := range enteries_bigrams {
+		if en.Frequency >= MIN_FREQ {
+			model.AddBigram(*en)
+		}
+	}
+
 	fmt.Print("READY \n*************************\n")
 
 	listen(*model)
@@ -162,7 +169,7 @@ func listen(model ta.SpellModel) {
 		if len(text) == 0 {
 			break
 		}
-
+		fmt.Println(text)
 		suggestion, _ := model.Lookup(text)
 		if len(suggestion) > 0 {
 			fmt.Printf("BEST: %s [%d]\n", suggestion, suggestion[0].Distance)
@@ -177,18 +184,22 @@ func listen(model ta.SpellModel) {
 			fmt.Println("ALL: ", suggestion)
 		}
 
+		suggestion, _ = model.LookupCompund(text, ta.SuggestionLevel(ta.ALL))
+		fmt.Println("COMPOUND: ", suggestion)
+
 		segment, _ := model.Segment(text)
-		if strings.Contains(segment.String(), " ") {
-			fmt.Println("SEGMENT: ", segment)
-		}
+		fmt.Println("SEGMENT: ", segment)
 
 	}
 }
 
 func main() {
-	enteries := readFile("data/new_new_word.json")
-	fmt.Println(len(enteries))
-	fmt.Printf("%T \n---------------------------\n", enteries)
+	enteries_words := readFile("data/words_jj.json")
+	enteries_bigrams := readFile("data/bigrams_jj.json")
+	fmt.Println(len(enteries_words))
+	fmt.Printf("%T \n---------------------------\n", enteries_words)
+	fmt.Println(len(enteries_bigrams))
+	fmt.Printf("%T \n---------------------------\n", enteries_bigrams)
 	// original_main()
-	new_main(enteries)
+	new_main(enteries_words, enteries_bigrams)
 }
