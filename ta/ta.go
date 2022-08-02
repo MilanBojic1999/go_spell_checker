@@ -16,7 +16,8 @@ import (
 	"sync/atomic"
 	"unicode"
 
-	"github.com/agusnavce/ta/utils"
+	utils "go_spell_checker/utils"
+
 	"github.com/mitchellh/mapstructure"
 	"github.com/tidwall/gjson"
 )

@@ -1,0 +1,19 @@
+syntax = "proto3";
+package proton;
+
+option go_package="./proton";
+
+service SpellCorrectorService {
+    rpc Correction(Spell_corrector_input) returns (Spell_corrector_output) {}
+}
+
+message Spell_corrector_input {
+    string query = 1;
+}
+
+message Spell_corrector_output {
+    string result = 1;
+    bool is_corrected = 2;
+    float probability = 3;
+    string language = 4;
+}

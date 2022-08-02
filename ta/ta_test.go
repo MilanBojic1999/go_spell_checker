@@ -7,7 +7,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/agusnavce/ta/utils"
+	utils "go_spell_checker/utils"
 )
 
 func BenchmarkSpell_Lookup(b *testing.B) {

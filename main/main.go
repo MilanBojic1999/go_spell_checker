@@ -4,11 +4,17 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
-	"github.com/agusnavce/ta"
-	"github.com/agusnavce/ta/utils"
+	"go_spell_checker/server"
+	ta "go_spell_checker/ta"
+	utils "go_spell_checker/utils"
+
+	"go_spell_checker/proton"
+
+	"google.golang.org/grpc"
 )
 
 func original_main() {
@@ -129,7 +135,10 @@ func readFile(path string) []*utils.Entry {
 	return result
 }
 
-const MIN_FREQ = 50
+const (
+	MIN_FREQ = 50
+	PORT     = "8090"
+)
 
 func new_main(enteries_words, enteries_bigrams []*utils.Entry) {
 	model := ta.NewSpellModel()
@@ -193,7 +202,7 @@ func listen(model ta.SpellModel) {
 	}
 }
 
-func main() {
+func main_two() {
 	enteries_words := readFile("data/words_jj.json")
 	enteries_bigrams := readFile("data/bigrams_jj.json")
 	fmt.Println(len(enteries_words))
@@ -202,4 +211,27 @@ func main() {
 	fmt.Printf("%T \n---------------------------\n", enteries_bigrams)
 	// original_main()
 	new_main(enteries_words, enteries_bigrams)
+}
+
+func main() {
+	fmt.Println("STARTING server on port: ", PORT)
+
+	laddr, err := net.ResolveTCPAddr("tcp", "localhost:"+PORT)
+	if err != nil {
+		fmt.Printf("ERROR with connection: %v\n", err)
+		return
+	}
+
+	lis, err := net.ListenTCP("tcp", laddr)
+	if err != nil {
+		fmt.Printf("ERROR with connection: %v\n", err)
+		return
+	}
+	newServerSC := server.NewServer()
+	grpcServer := grpc.NewServer()
+	proton.RegisterSpellCorrectorServiceServer(grpcServer, newServerSC)
+
+	if err := grpcServer.Serve(lis); err != nil {
+		fmt.Printf("failed to serve: %v", err)
+	}
 }
